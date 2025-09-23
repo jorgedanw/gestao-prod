@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Gestão de Produção — Painel</title>
+
+  <!--
+    👨‍🏫 Objetivo desta revisão (mantendo sua base):
+    1) Mostrar m² de pintura nos cards de OP e no modal quando vierem do backend.
+       (Backend já envia em /ops e em /ops/faltando-pintura.)
+    2) Manter a regra de contorno por urgência (≤5 dias amarelo, ≤3 dias vermelho).
+    3) Manter pílulas "Por Cor", gráfico de série diária e layout responsivo.
+    4) Datas sempre em DD/MM/AAAA (exibição), inputs continuam <input type="date">.
+    5) NÃO remover ou renomear suas funções existentes — apenas incrementos.
+  -->
+
+  <style>
+    :root{
+      --bg:#f6f7fb; --card:#fff; --muted:#6b7280; --b:#0f172a; --pri:#2563eb;
+      --bd:#e5e7eb; --ok:#10b981;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial; color:var(--b); background:var(--bg);}
+    header{display:flex; gap:12px; align-items:center; justify-content:space-between; padding:14px 16px; background:#fff; border-bottom:1px solid var(--bd); position:sticky; top:0; z-index:5;}
+    .brand{font-weight:700}
+    .tabs{display:flex; gap:8px}
+    .tabs a{text-decoration:none; color:var(--b); padding:6px 10px; border:1px solid var(--bd); border-radius:8px; background:#fff}
+    main{padding:16px; max-width:1200px; margin:0 auto;}
+
+    .row{display:flex; flex-wrap:wrap; gap:8px; align-items:end; margin:8px 0;}
+    .card{background:var(--card); border:1px solid var(--bd); border-radius:12px; padding:12px;}
+    .cards{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); margin:12px 0;}
+
+    label small{display:block; color:var(--muted); font-size:12px; margin-bottom:4px;}
+    input,select,button{padding:8px 10px; border:1px solid var(--bd); border-radius:8px; background:#fff}
+    input[type="text"]{min-width:150px}
+    button{cursor:pointer}
+    button.pri{background:var(--pri); color:#fff; border-color:var(--pri)}
+    .muted{color:var(--muted)}
+    .num{font-size:28px; font-weight:700}
+    .pill{display:inline-block; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:12px; cursor:pointer; margin:2px}
+
+    .op{background:#fff; border:1px solid var(--bd); border-radius:12px; padding:12px; margin:10px 0; cursor:pointer; transition:box-shadow .15s, border-color .15s;}
+    .op:hover{box-shadow:0 1px 0 0 rgba(0,0,0,.03)}
+    .op-top{display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between;}
+    .op-id{font-weight:700; text-decoration:underline; text-underline-offset:3px}
+    .bad{font-size:12px; padding:3px 8px; border-radius:999px; border:1px solid var(--bd); background:#f8fafc;}
+    .bad.gray{background:#f3f4f6; color:#374151; border-color:#e5e7eb}
+    .op-desc{margin:6px 0; color:#111827}
+    .progress{height:10px; background:#e5e7eb; border-radius:999px; overflow:hidden}
+    .progress > i{display:block; height:100%; background:linear-gradient(90deg, var(--ok), #34d399 60%, #a7f3d0); width:0%}
+    .tags{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
+    .tag{font-size:12px; padding:3px 8px; border-radius:999px; background:#f3f4f6; border:1px solid var(--bd)}
+
+    .section-title{font-weight:700; margin:6px 0 8px}
+    .hide{display:none}
+
+    .chart-wrap{background:#fff; border:1px solid var(--bd); border-radius:12px; padding:12px;}
+    #chartDaily{width:100%; height:240px; display:block}
+
+    /* Modal */
+    .modal-mask{position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:30;}
+    .modal{width:min(920px, 92vw); max-height:86vh; overflow:auto; background:#fff; border:1px solid var(--bd); border-radius:14px; box-shadow:0 20px 40px rgba(0,0,0,.18);}
+    .modal header{position:sticky; top:0; background:#fff; border-bottom:1px solid var(--bd); border-radius:14px 14px 0 0;}
+    .modal .content{padding:14px 16px}
+    .modal .close{margin-left:auto; border-color:#e5e7eb}
+    .grid-2{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+    table{width:100%; border-collapse:collapse}
+    th,td{border-bottom:1px solid #f1f5f9; padding:8px; text-align:left; font-size:13px}
+    th{background:#f8fafc}
+    tfoot td{font-weight:700}
+    .mini{font-size:12px}
+    .badge{font-size:12px; padding:2px 8px; border:1px solid var(--bd); border-radius:999px; background:#fff}
+    .warn{color:#92400e; background:#fef3c7; border-color:#fcd34d}
+
+    /* Alertas por validade */
+    .op.due-yellow{ border-color:#f59e0b; box-shadow:0 0 0 2px rgba(245,158,11,.15) inset;}
+    .op.due-red{ border-color:#ef4444; box-shadow:0 0 0 2px rgba(239,68,68,.18) inset;}
+
+    /* Aviso de conexão */
+    .toast{
+      background:#fff; border:1px solid #fecaca; color:#7f1d1d; padding:10px; border-radius:10px;
+      display:none; margin:12px 0;
+    }
+
+    @media (max-width:560px){
+      header{flex-direction:column; align-items:flex-start}
+      .row > *{flex:1 1 160px}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Topo -->
+  <header>
+    <div class="brand">Gestão de Produção — Painel</div>
+    <nav class="tabs">
+      <a href="#op-anchor">OPs</a>
+      <a href="#dash-anchor">Painéis</a>
+      <a href="#" id="gotoPaint">Pintura</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Aviso de conexão com a API (aparece se der erro) -->
+    <div id="toast" class="toast">Não consegui conectar à API. Verifique se o backend está em <b>http://127.0.0.1:8000</b> e tente novamente.</div>
+
+    <!-- Filtros principais -->
+    <section class="card">
+      <div class="row">
+        <label>
+          <small>De</small>
+          <!-- input type=date já abre calendário; não removemos -->
+          <input type="date" id="from">
+        </label>
+        <label>
+          <small>Até</small>
+          <input type="date" id="to">
+        </label>
+        <label>
+          <small>Campo de data</small>
+          <select id="dateField">
+            <option value="validade" selected>Validade</option>
+            <option value="prev_inicio">Prev. Início</option>
+            <option value="emissao">Emissão</option>
+          </select>
+        </label>
+        <label>
+          <small>Filial</small>
+          <input type="number" id="filial" value="1" min="1" style="max-width:100px">
+        </label>
+        <label style="min-width:240px">
+          <small>Filtro rápido</small>
+          <select id="statusQuick">
+            <option value="todas" selected>Todas</option>
+            <option value="abertas">Abertas</option>
+            <option value="ep">Entrada Parcial</option>
+            <option value="paint">Faltando apenas pintura</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row">
+        <label style="min-width:280px;">
+          <small>Buscar (texto / nº OP / nº Pedido)</small>
+          <input type="text" id="q" placeholder="ex.: 6104, 9792, CLIENTE X">
+        </label>
+        <label style="min-width:260px;">
+          <small>Cor contém</small>
+          <input type="text" id="cor_contains" placeholder="ex.: BRANCO, GRAFITE 7024">
+        </label>
+        <label>
+          <small>Ordenar por</small>
+          <select id="orderBy">
+            <option value="validade" selected>Validade</option>
+            <option value="prev_inicio">Prev. Início</option>
+            <option value="emissao">Emissão</option>
+            <option value="percent">Progresso</option>
+            <option value="op_numero">Nº OP</option>
+          </select>
+        </label>
+        <label>
+          <small>Direção</small>
+          <select id="orderDir">
+            <option value="desc" selected>Desc</option>
+            <option value="asc">Asc</option>
+          </select>
+        </label>
+        <label>
+          <small>Tam. página</small>
+          <select id="pageSize"><option>20</option><option selected>50</option><option>100</option></select>
+        </label>
+        <label>
+          <small>Auto-atualizar</small>
+          <select id="autoRefresh">
+            <option value="0" selected>Desligado</option>
+            <option value="15">15s</option>
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+          </select>
+        </label>
+
+        <div style="flex:1"></div>
+        <button class="pri" id="btnAtualizarTudo">Atualizar painel</button>
+      </div>
+
+      <!-- Ajuda específica do modo Pintura -->
+      <div id="hintPaint" class="muted hide">
+        * No modo <b>Faltando apenas pintura</b> os campos “Buscar / Cor contém” não se aplicam à lista principal (endpoint dedicado).
+      </div>
+    </section>
+
+    <!-- KPIs -->
+    <section class="cards" id="kpis">
+      <div class="card">
+        <b>Total listados (OPs)</b>
+        <div class="num" id="kpiTotal">—</div>
+        <div class="muted" id="kpiJanela">Janela —</div>
+      </div>
+      <div class="card">
+        <b>Média de progresso</b>
+        <div class="num" id="kpiMedia">—</div>
+        <div class="progress" style="margin-top:6px"><i id="kpiBar" style="width:0%"></i></div>
+      </div>
+      <div class="card">
+        <b>Faltando pintura</b>
+        <div class="num">
+          <span id="kpiPaint">—</span>
+          <span class="pill" id="linkPaintList" title="Aplicar o filtro e ver na lista">ver lista</span>
+        </div>
+        <div class="muted" id="kpiPaintMode"></div>
+      </div>
+    </section>
+
+    <!-- Painéis agregados -->
+    <a id="dash-anchor"></a>
+    <section class="card">
+      <div class="section-title">Painéis (agregados)</div>
+
+      <div class="cards">
+        <div class="card"><b>Por Status</b><div id="byStatus" class="muted">—</div></div>
+        <div class="card"><b>Por Cor</b><div id="byColor" class="muted">—</div></div>
+        <div class="card">
+          <b>Média de Progresso (no período)</b>
+          <div id="avgPct" class="num" style="font-size:26px">—</div>
+          <div class="muted" id="winInfo"></div>
+        </div>
+      </div>
+
+      <div class="chart-wrap" style="margin-top:8px">
+        <div class="section-title" style="margin-top:0">Série diária</div>
+        <canvas id="chartDaily" width="1100" height="260" aria-label="Série diária" role="img"></canvas>
+      </div>
+    </section>
+
+    <!-- Lista de OPs -->
+    <a id="op-anchor"></a>
+    <section class="card">
+      <div class="section-title">OPs</div>
+      <div class="muted" id="opsInfo">—</div>
+      <div id="opList"></div>
+    </section>
+  </main>
+
+  <!-- Modal de detalhe -->
+  <div class="modal-mask" id="modalMask" role="dialog" aria-modal="true" aria-labelledby="opTitle">
+    <div class="modal" role="document">
+      <header class="row" style="margin:0; padding:10px 12px;">
+        <div id="opTitle" style="font-weight:700">Detalhe da OP</div>
+        <button class="close" id="btnCloseModal">Fechar</button>
+      </header>
+      <div class="content">
+        <div class="grid-2">
+          <div class="card">
+            <div class="mini muted">Cliente / Descrição</div>
+            <div id="mDesc" style="margin-top:4px"></div>
+            <div class="mini muted" style="margin-top:8px" id="mMeta"></div>
+            <div class="mini" style="margin-top:8px">
+              <span class="badge" id="mStatus"></span> <span class="badge" id="mCor"></span>
+            </div>
+            <div class="progress" style="margin-top:10px"><i id="mBar" style="width:0%"></i></div>
+            <!-- m² de pintura no modal -->
+            <div id="mM2" class="mini" style="margin-top:8px"></div>
+          </div>
+          <div class="card">
+            <div class="mini muted">Roteiro (setores)</div>
+            <div id="mRoteiro" class="tags" style="margin-top:6px"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <b>Itens</b>
+          <div class="muted mini">Descrição do produto, cor e quantidades</div>
+          <div style="overflow:auto; margin-top:8px">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:80px">Lote</th>
+                  <th style="width:80px">Prod.</th>
+                  <th>Descrição</th>
+                  <th style="width:180px">Cor</th>
+                  <th style="width:90px">Qtd</th>
+                  <th style="width:90px">Produz.</th>
+                  <th style="width:90px">Saldo</th>
+                </tr>
+              </thead>
+              <tbody id="mItens"></tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="4">Totais</td>
+                  <td id="mTotQtd">0</td>
+                  <td id="mTotProd">0</td>
+                  <td id="mTotSaldo">0</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div id="mWarn" class="badge warn hide" style="margin-top:10px">Sem roteiro encontrado nesta OP.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /***********************
+     * Config & Helpers
+     ***********************/
+    const API = (() => {
+      // Mantém sua lógica: funciona abrindo o HTML direto, no Live Server, etc.
+      try{
+        if(location.protocol === 'file:') return 'http://127.0.0.1:8000';
+        const u = new URL(location.href);
+        return `${u.protocol}//${u.hostname}:8000`;
+      }catch{
+        return 'http://127.0.0.1:8000';
+      }
+    })();
+
+    const DATE_KEY_MAP = { validade:"dt_validade", prev_inicio:"dt_prev_inicio", emissao:"dt_emissao" };
+    const QUICK_TO_STATUS = {
+      todas:"ABERTA,INICIADA,ENTRADA PARCIAL",
+      abertas:"ABERTA",
+      ep:"ENTRADA PARCIAL"
+    };
+    const SETOR_MAP = {1:"Perfiladeira",3:"Serralheria",4:"Pintura",6:"Eixo"};
+    const $ = s => document.querySelector(s);
+
+    const pad = n => String(n).padStart(2,"0");
+    function isoToBr(s){
+      if(!s) return "—";
+      const d = s.slice(0,10);
+      const [Y,M,D] = d.split("-");
+      if(!Y||!M||!D) return s;
+      return `${pad(D)}/${pad(M)}/${Y}`;
+    }
+    function setDefaultDates(){
+      const t=new Date(), d1=new Date(t), d2=new Date(t);
+      d1.setDate(d1.getDate()-7); d2.setDate(d2.getDate()+30);
+      $('#from').value=`${d1.getFullYear()}-${pad(d1.getMonth()+1)}-${pad(d1.getDate())}`;
+      $('#to').value  =`${d2.getFullYear()}-${pad(d2.getMonth()+1)}-${pad(d2.getDate())}`;
+    }
+
+    // Dias restantes até a validade (usa só a data, sem horas)
+    function daysUntilISO(iso){
+      if(!iso) return null;
+      const today = new Date(), t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const d = new Date(iso), d0 = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const MS = 24*60*60*1000;
+      return Math.floor((d0 - t0)/MS);
+    }
+    // Regra de urgência (≤3d vermelho, ≤5d amarelo)
+    function evaluateUrgency(op){
+      const diff = daysUntilISO(op?.dt_validade);
+      if(diff === null) return null;
+      if(diff <= 3) return { cls:'due-red', label:`URGENTE: ${diff}d`, title:`Faltam ${diff} dia(s) para a VALIDADE` };
+      if(diff <= 5) return { cls:'due-yellow', label:`Atenção: ${diff}d`, title:`Faltam ${diff} dia(s) para a VALIDADE` };
+      return null;
+    }
+
+    // Gráfico simples
+    function drawDailySeries(points){
+      const cvs=$('#chartDaily'), ctx=cvs.getContext('2d');
+      ctx.clearRect(0,0,cvs.width,cvs.height);
+      if(!points?.length){ ctx.fillStyle='#94a3b8'; ctx.fillText('Sem dados para a série diária.',16,20); return; }
+      const padL=48, padR=12, padT=16, padB=26;
+      const W=cvs.width-padL-padR, H=cvs.height-padT-padB;
+      const maxY=Math.max(...points.map(p=>p.y),5), stepY=Math.max(1,Math.ceil(maxY/5));
+      ctx.strokeStyle='#e5e7eb'; ctx.fillStyle='#6b7280'; ctx.lineWidth=1;
+      for(let y=0;y<=maxY;y+=stepY){
+        const py=padT+H-(y/maxY)*H;
+        ctx.beginPath(); ctx.moveTo(padL,py); ctx.lineTo(padL+W,py); ctx.stroke();
+        ctx.fillText(String(y),8,py+3);
+      }
+      const n=points.length, xAt=i=>padL+(n<=1?W/2:(W*(i/(n-1))));
+      ctx.beginPath(); ctx.strokeStyle='#2563eb'; ctx.lineWidth=2;
+      points.forEach((p,i)=>{ const x=xAt(i), y=padT+H-(p.y/maxY)*H; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+      ctx.stroke();
+      ctx.fillStyle='#2563eb'; const stepX=Math.max(1,Math.floor(n/8));
+      points.forEach((p,i)=>{ const x=xAt(i), y=padT+H-(p.y/maxY)*H; ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2); ctx.fill(); if(i%stepX===0||i===n-1) ctx.fillText(p.x,x-14,padT+H+18); });
+    }
+
+    /***********************
+     * Busca de setores (somente os reais)
+     ***********************/
+    const roteiroCache = new Map();
+    async function fetchSectors(opId){
+      if(roteiroCache.has(opId)) return roteiroCache.get(opId);
+      try{
+        const r = await fetch(`${API}/ops/${opId}`);
+        if(!r.ok) throw 0;
+        const j = await r.json();
+        const names=(j.roteiro||[]).map(r=>SETOR_MAP[r.setor_codigo]).filter(Boolean);
+        roteiroCache.set(opId,names);
+        return names;
+      }catch{ return []; }
+    }
+    async function populateSectorsForCards(items){
+      const limit=5; let running=0, idx=0;
+      return new Promise(resolve=>{
+        function next(){
+          while(running<limit && idx<items.length){
+            const op=items[idx++]; running++;
+            fetchSectors(op.op_id).then(sectors=>{
+              const c=document.querySelector(`[data-sectors-for="${op.op_id}"]`);
+              if(c){
+                c.innerHTML="";
+                if(!sectors.length){ const s=document.createElement('span'); s.className='tag'; s.textContent='(sem roteiro)'; c.appendChild(s); }
+                else sectors.forEach(n=>{ const s=document.createElement('span'); s.className='tag'; s.textContent=n; c.appendChild(s); });
+              }
+            }).finally(()=>{ running--; if(idx>=items.length && running===0) resolve(); else next(); });
+          }
+        }
+        next();
+      });
+    }
+
+    /***********************
+     * Render de cards de OP
+     ***********************/
+    function fmtNum(x){
+      const v = Number(x||0);
+      return v.toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:3});
+    }
+    function renderOpCards(containerSel, items, dateField){
+      const wrap=document.querySelector(containerSel); wrap.innerHTML="";
+      const dateKey=DATE_KEY_MAP[dateField]||'dt_validade';
+
+      (items||[]).forEach(op=>{
+        const card=document.createElement('div'); card.className='op'; card.setAttribute('data-op-id', String(op.op_id));
+
+        // Urgência por VALIDADE
+        const urg = evaluateUrgency(op);
+        if(urg){ card.classList.add(urg.cls); }
+
+        const top=document.createElement('div'); top.className='op-top';
+        const left=document.createElement('div');
+        left.innerHTML=`<span class="op-id">OP ${op.op_numero??''}</span>`;
+        const st=document.createElement('span'); st.className='bad'; st.textContent=op.status_nome||'';
+        const cor=document.createElement('span'); cor.className='bad gray'; cor.textContent=`Cor: ${op.cor_txt||'—'}`;
+        top.append(left, st, cor);
+
+        // Badge da urgência
+        if(urg){
+          const b = document.createElement('span');
+          b.className = 'bad';
+          if(urg.cls==='due-red'){ b.style.background='#fee2e2'; b.style.borderColor='#fecaca'; b.style.color='#7f1d1d'; }
+          else{ b.style.background='#fef3c7'; b.style.borderColor='#fde68a'; b.style.color='#78350f'; }
+          b.textContent = urg.label;
+          b.title = urg.title;
+          top.appendChild(b);
+        }
+
+        // ✅ m² pintura no card: aparece quando backend enviar m2_* (já presente em /ops e /ops/faltando-pintura).
+        if (typeof op.m2_pintura_total !== 'undefined') {
+          const m2 = document.createElement('span');
+          m2.className = 'bad';
+          m2.title = 'M² de pintura (total / produzida / saldo)';
+          m2.textContent = `m²: ${fmtNum(op.m2_pintura_total)} / ${fmtNum(op.m2_pintura_produzida)} / ${fmtNum(op.m2_pintura_saldo)}`;
+          top.appendChild(m2);
+        }
+
+        const desc=document.createElement('div'); desc.className='op-desc'; desc.textContent=(op.descricao||'').trim();
+
+        const meta=document.createElement('div'); meta.className='muted';
+        const dtEmi=isoToBr(op.dt_emissao||'');
+        const dtPrev=isoToBr(op.dt_prev_inicio||'');
+        const ref=isoToBr(op[dateKey]||op.dt_validade||op.dt_prev_inicio||op.dt_emissao||'');
+        const refLabel=document.getElementById('dateField').value==='validade'?'validade':(document.getElementById('dateField').value==='prev_inicio'?'prev. início':'emissão');
+        meta.textContent=`Emissão: ${dtEmi} • Prev. início: ${dtPrev} • ${refLabel}: ${ref}`;
+
+        const bar=document.createElement('div'); bar.className='progress';
+        const fill=document.createElement('i'); fill.style.width=Math.max(0,Math.min(100,Number(op.percent_concluido||0)))+'%';
+        bar.appendChild(fill);
+
+        const tags=document.createElement('div'); tags.className='tags'; tags.setAttribute('data-sectors-for', String(op.op_id));
+        const loading=document.createElement('span'); loading.className='tag'; loading.textContent='Carregando setores...';
+        tags.appendChild(loading);
+
+        card.append(top, desc, meta, bar, tags);
+        wrap.appendChild(card);
+
+        card.addEventListener('click', ()=> openOpModal(op.op_id));
+      });
+
+      if(!items?.length){
+        const emp=document.createElement('div'); emp.className='muted'; emp.textContent='Nenhuma OP encontrada.'; wrap.appendChild(emp);
+      }else{
+        populateSectorsForCards(items);
+      }
+    }
+
+    /***********************
+     * Modal de detalhe
+     ***********************/
+    const modalMask = document.getElementById('modalMask');
+    document.getElementById('btnCloseModal').addEventListener('click', ()=> modalMask.style.display='none');
+    modalMask.addEventListener('click', (e)=>{ if(e.target===modalMask) modalMask.style.display='none'; });
+
+    async function openOpModal(opId){
+      try{
+        const r = await fetch(`${API}/ops/${opId}`);
+        if(!r.ok) throw 0;
+        const j = await r.json();
+        fillOpModal(j);
+        modalMask.style.display='flex';
+      }catch{
+        alert('Não foi possível carregar o detalhe desta OP.');
+      }
+    }
+
+    function fillOpModal(data){
+      const op = data.op||{};
+      document.getElementById('opTitle').textContent = `OP ${op.op_numero||''} — ${op.status_nome||''}`;
+      document.getElementById('mDesc').textContent = op.descricao||'';
+      document.getElementById('mStatus').textContent = op.status_nome||'';
+      document.getElementById('mCor').textContent = `Cor: ${op.cor_txt||'—'}`;
+      document.getElementById('mBar').style.width = Math.max(0,Math.min(100,Number(op.percent_concluido||0)))+'%';
+
+      const meta = `Emissão: ${isoToBr(op.dt_emissao||'')} • Prev. início: ${isoToBr(op.dt_prev_inicio||'')} • Validade: ${isoToBr(op.dt_validade||'')}`;
+      document.getElementById('mMeta').textContent = meta;
+
+      // ✅ m² de pintura do detalhe (/ops/{id})
+      const m2 = data.pintura_m2 || null;
+      if (m2) {
+        const txt = `m² pintura — total: ${fmtNum(m2.total)} • produzida: ${fmtNum(m2.produzida)} • saldo: ${fmtNum(m2.saldo)}`;
+        document.getElementById('mM2').textContent = txt;
+      } else {
+        document.getElementById('mM2').textContent = '';
+      }
+
+      const rot = data.roteiro||[];
+      const rCont = document.getElementById('mRoteiro'); rCont.innerHTML='';
+      if(rot.length===0){ document.getElementById('mWarn').classList.remove('hide'); }
+      else{
+        document.getElementById('mWarn').classList.add('hide');
+        rot.forEach(r=>{ const s=document.createElement('span'); s.className='tag'; s.textContent=SETOR_MAP[r.setor_codigo]||`Setor ${r.setor_codigo}`; rCont.appendChild(s); });
+      }
+
+      const tb = document.getElementById('mItens'); tb.innerHTML='';
+      let tQtd=0,tProd=0,tSaldo=0;
+      (data.itens||[]).forEach(it=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`
+          <td>${it.lote ?? ''}</td>
+          <td>${it.pro_codigo ?? ''}</td>
+          <td>${(it.pro_desc||'').replaceAll('<','&lt;')}</td>
+          <td>${it.cor_nome ?? ''}</td>
+          <td>${fmtNum(it.qtd)}</td>
+          <td>${fmtNum(it.qtd_produzidas)}</td>
+          <td>${fmtNum(it.qtd_saldo)}</td>
+        `;
+        tb.appendChild(tr);
+        tQtd += Number(it.qtd||0);
+        tProd+= Number(it.qtd_produzidas||0);
+        tSaldo+=Number(it.qtd_saldo||0);
+      });
+      document.getElementById('mTotQtd').textContent   = fmtNum(tQtd);
+      document.getElementById('mTotProd').textContent  = fmtNum(tProd);
+      document.getElementById('mTotSaldo').textContent = fmtNum(tSaldo);
+    }
+
+    /***********************
+     * Agregados (inclui pills por cor)
+     ***********************/
+    function renderByColorPills(list){
+      const host = document.getElementById('byColor');
+      host.innerHTML = '';
+      if(!Array.isArray(list) || !list.length){ host.textContent = '—'; return; }
+
+      const arr = [...list].sort((a,b)=>(Number(b.qtd||0))-(Number(a.qtd||0)));
+      arr.forEach(({cor,qtd})=>{
+        const pill = document.createElement('span');
+        pill.className = 'pill';
+        pill.title = 'Filtrar por esta cor';
+        pill.textContent = `${cor}: ${qtd}`;
+        pill.addEventListener('click', ()=>{
+          document.getElementById('cor_contains').value = (cor === 'SEM PINTURA') ? '' : cor;
+          document.getElementById('statusQuick').value = 'todas';
+          location.hash = '#op-anchor';
+          loadOps();
+        });
+        host.appendChild(pill);
+      });
+
+      const active = (document.getElementById('cor_contains').value||'').trim();
+      if(active){
+        const clear = document.createElement('span');
+        clear.className = 'pill';
+        clear.style.background = '#fee2e2';
+        clear.style.color = '#7f1d1d';
+        clear.title = 'Limpar filtro de cor';
+        clear.textContent = 'limpar filtro';
+        clear.addEventListener('click', ()=>{
+          document.getElementById('cor_contains').value = '';
+          loadOps();
+        });
+        host.appendChild(clear);
+      }
+    }
+
+    /***********************
+     * Cargas (lista, dashboard e KPI pintura)
+     ***********************/
+    function getCommon(){
+      return {
+        filial:Number(document.getElementById('filial').value||1),
+        dateField:document.getElementById('dateField').value,
+        fromIso:document.getElementById('from').value,
+        toIso:document.getElementById('to').value,
+        quick:document.getElementById('statusQuick').value,
+        pageSize:Number(document.getElementById('pageSize').value||50),
+        orderBy:document.getElementById('orderBy').value,
+        orderDir:document.getElementById('orderDir').value,
+        q:document.getElementById('q').value.trim(),
+        cor:document.getElementById('cor_contains').value.trim()
+      }
+    }
+
+    async function loadOps(){
+      const toast = document.getElementById('toast'); toast.style.display='none';
+      const p = getCommon();
+
+      try{
+        if(p.quick==='paint'){
+          document.getElementById('hintPaint').classList.remove('hide');
+          const params=new URLSearchParams({filial:p.filial, date_field:p.dateField, limit:String(p.pageSize)});
+          if(p.fromIso&&p.toIso){ params.set('from',p.fromIso); params.set('to',p.toIso); }
+          else{ params.set('days_back','7'); params.set('days_ahead','30'); }
+          const res=await fetch(`${API}/ops/faltando-pintura?`+params.toString());
+          if(!res.ok) throw 0;
+          const j=await res.json();
+          document.getElementById('opsInfo').textContent=`Faltando pintura: ${j.count??0} • modo: ${j.mode??'-'} • Janela ${isoToBr(j.window?.from||'')} → ${isoToBr(j.window?.to||'')}`;
+          // ✅ cards com m² (endpoint já manda m2_*)
+          renderOpCards('#opList', j.items||[], p.dateField);
+          document.getElementById('kpiTotal').textContent=j.count??0;
+          document.getElementById('kpiJanela').textContent=`Janela ${isoToBr(j.window?.from||'')} → ${isoToBr(j.window?.to||'')}`;
+          return;
+        }
+
+        document.getElementById('hintPaint').classList.add('hide');
+        const status = QUICK_TO_STATUS[p.quick] || QUICK_TO_STATUS.todas;
+        const params=new URLSearchParams({
+          filial:p.filial, date_field:p.dateField, status, page:'1', page_size:String(p.pageSize),
+          order_by:p.orderBy, order_dir:p.orderDir
+        });
+        if(p.fromIso&&p.toIso){ params.set('from',p.fromIso); params.set('to',p.toIso); }
+        else{ params.set('days_back','7'); params.set('days_ahead','30'); }
+        if(p.q) params.set('q',p.q);
+        if(p.cor) params.set('cor_contains',p.cor);
+
+        const res=await fetch(`${API}/ops?`+params.toString());
+        if(!res.ok) throw 0;
+        const j=await res.json();
+        document.getElementById('opsInfo').textContent=`Total: ${j.total ?? j.items?.length ?? 0} • Janela ${isoToBr(j.window?.from||'')} → ${isoToBr(j.window?.to||'')}`;
+        // ✅ cards com m²: /ops agora traz m2_* (paint CTE no backend)
+        renderOpCards('#opList', j.items||[], p.dateField);
+        document.getElementById('kpiTotal').textContent=j.total ?? j.items?.length ?? 0;
+        document.getElementById('kpiJanela').textContent=`Janela ${isoToBr(j.window?.from||'')} → ${isoToBr(j.window?.to||'')}`;
+      }catch(e){
+        console.error(e);
+        toast.style.display='block';
+      }
+    }
+
+    async function loadDashboard(){
+      const toast = document.getElementById('toast'); toast.style.display='none';
+      const p=getCommon();
+      const status=(p.quick==='abertas')?'ABERTA':(p.quick==='ep')?'ENTRADA PARCIAL':'ABERTA,INICIADA,ENTRADA PARCIAL';
+      const params=new URLSearchParams({filial:p.filial, date_field:p.dateField, status});
+      if(p.fromIso&&p.toIso){ params.set('from',p.fromIso); params.set('to',p.toIso); }
+      else{ params.set('days_back','7'); params.set('days_ahead','30'); }
+      try{
+        const res=await fetch(`${API}/dashboard?`+params.toString());
+        if(!res.ok) throw 0;
+        const j=await res.json();
+
+        document.getElementById('avgPct').textContent=j.avg_percent_concluido ?? '—';
+        document.getElementById('winInfo').textContent=`Janela ${isoToBr(j.window?.from||'')} → ${isoToBr(j.window?.to||'')} (${j.window?.field})`;
+        document.getElementById('kpiMedia').textContent=j.avg_percent_concluido ?? '—';
+        document.getElementById('kpiBar').style.width=(Number(j.avg_percent_concluido||0))+'%';
+        document.getElementById('byStatus').textContent=(j.by_status||[]).map(r=>`${r.status_nome}: ${r.qtd}`).join(' · ') || '—';
+
+        // Pílulas por cor com clique → filtro
+        renderByColorPills(j.by_color || []);
+
+        const pts=(j.series||[]).map(r=>({x:isoToBr(r.dia||'').slice(0,5), y: Number(r.qtd||0)}));
+        drawDailySeries(pts);
+      }catch(e){
+        console.error(e);
+        toast.style.display='block';
+      }
+    }
+
+    async function loadPaintKPI(){
+      const toast = document.getElementById('toast'); toast.style.display='none';
+      const p=getCommon();
+      const params=new URLSearchParams({filial:p.filial, date_field:p.dateField});
+      if(p.fromIso&&p.toIso){ params.set('from',p.fromIso); params.set('to',p.toIso); }
+      else{ params.set('days_back','7'); params.set('days_ahead','30'); }
+      try{
+        const res=await fetch(`${API}/ops/faltando-pintura?`+params.toString());
+        if(!res.ok) throw 0;
+        const j=await res.json();
+        document.getElementById('kpiPaint').textContent=j.count ?? 0;
+        document.getElementById('kpiPaintMode').textContent=j.mode ? `modo: ${j.mode}` : '';
+      }catch(e){
+        console.error(e);
+        toast.style.display='block';
+      }
+    }
+
+    async function atualizarTudo(){ await Promise.all([loadOps(), loadDashboard(), loadPaintKPI()]); }
+
+    // Auto-refresh
+    let timer=null;
+    document.getElementById('autoRefresh').addEventListener('change', ()=>{
+      if(timer){ clearInterval(timer); timer=null; }
+      const s=Number(document.getElementById('autoRefresh').value||0);
+      if(s>0) timer=setInterval(atualizarTudo, s*1000);
+    });
+
+    // Dica do modo pintura
+    document.getElementById('statusQuick').addEventListener('change', ()=>{
+      const isPaint=document.getElementById('statusQuick').value==='paint';
+      document.getElementById('hintPaint').classList.toggle('hide', !isPaint);
+    });
+
+    // Atalhos
+    document.getElementById('btnAtualizarTudo').addEventListener('click', atualizarTudo);
+    document.getElementById('linkPaintList').addEventListener('click', ()=>{
+      document.getElementById('statusQuick').value='paint';
+      document.getElementById('hintPaint').classList.remove('hide');
+      location.hash='#op-anchor';
+      atualizarTudo();
+    });
+    document.getElementById('gotoPaint').addEventListener('click', (e)=>{
+      e.preventDefault();
+      document.getElementById('statusQuick').value='paint';
+      document.getElementById('hintPaint').classList.remove('hide');
+      location.hash='#op-anchor';
+      atualizarTudo();
+    });
+
+    // Inicialização
+    setDefaultDates();
+    atualizarTudo();
+  </script>
+</body>
+</html>

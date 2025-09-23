@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Pintura — Operador</title>
+<style>
+  :root{--bd:#e5e7eb;--mut:#6b7280;--ok:#10b981;--warn:#f59e0b;--err:#ef4444;--pri:#2563eb;}
+  *{box-sizing:border-box}
+  body{margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial; background:#f6f7fb}
+  header{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 14px; background:#fff; border-bottom:1px solid var(--bd)}
+  a.btn,button{padding:8px 12px; border:1px solid var(--bd); background:#fff; border-radius:8px; text-decoration:none; color:#111827; cursor:pointer}
+  .pri{background:var(--pri); color:#fff; border-color:var(--pri)}
+  main{max-width:1100px; margin:0 auto; padding:14px}
+  .row{display:flex; flex-wrap:wrap; gap:8px; align-items:end; margin:10px 0}
+  label small{display:block; color:var(--mut); font-size:12px; margin-bottom:4px}
+  input,select{padding:8px 10px; border:1px solid var(--bd); border-radius:8px; background:#fff}
+  .card{background:#fff; border:1px solid var(--bd); border-radius:12px; padding:12px; margin:10px 0}
+  .group{border:1px solid var(--bd); border-radius:12px; background:#fff; overflow:hidden; margin:12px 0}
+  .ghead{display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#f8fafc; border-bottom:1px solid var(--bd)}
+  .ghead b{font-size:15px}
+  .op{padding:10px 12px; border-top:1px dashed #eef2f7; display:grid; grid-template-columns: 1fr auto; gap:10px}
+  .op .meta{color:#111827}
+  .op .mut{color:var(--mut); font-size:12px}
+  .op .btns{display:flex; gap:6px; align-items:center}
+  .tag{font-size:12px; padding:3px 8px; border:1px solid var(--bd); border-radius:999px; background:#f3f4f6}
+  .ok{background:#ecfdf5; border-color:#bbf7d0; color:#065f46}
+  .warn{background:#fef3c7; border-color:#fde68a; color:#78350f}
+  .err{background:#fee2e2; border-color:#fecaca; color:#7f1d1d}
+  .toast{display:none; background:#fff; border:1px solid #fecaca; color:#7f1d1d; padding:10px; border-radius:10px; margin:8px 0}
+</style>
+</head>
+<body>
+<header>
+  <div><b>Pintura — Operador</b></div>
+  <div style="display:flex; gap:8px">
+    <a class="btn" href="index.html">← Voltar ao Painel</a>
+  </div>
+</header>
+
+<main>
+  <!-- Mensagens de erro amigáveis -->
+  <div id="toast" class="toast"></div>
+
+  <section class="card">
+    <div class="row">
+      <label><small>Filial</small><input type="number" id="filial" value="1" min="1" style="max-width:90px"></label>
+      <label><small>De</small><input type="date" id="from"></label>
+      <label><small>Até</small><input type="date" id="to"></label>
+      <label><small>Operador</small><input type="text" id="usuario" placeholder="seu nome"></label>
+      <label><small>Cor contém</small><input type="text" id="cor" placeholder="ex.: BRANCO"></label>
+      <div style="flex:1"></div>
+      <button id="btnCarregar" class="pri">Atualizar fila</button>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <span class="tag">Legenda:</span>
+      <span class="tag ok">Em execução (local)</span>
+      <span class="tag warn">Atenção: validade ≤ 5 dias</span>
+      <span class="tag err">Urgente: validade ≤ 3 dias</span>
+    </div>
+  </section>
+
+  <section id="host"></section>
+</main>
+
+<script>
+  /* ===========================
+     Configuração do endpoint
+     =========================== */
+  const API = 'http://127.0.0.1:8000';
+
+  /* ===========================
+     Utilitários de data
+     =========================== */
+  const pad=n=>String(n).padStart(2,'0');
+  function setDefaults(){
+    const t=new Date(), d1=new Date(t), d2=new Date(t); d1.setDate(d1.getDate()-7); d2.setDate(d2.getDate()+30);
+    document.getElementById('from').value=`${d1.getFullYear()}-${pad(d1.getMonth()+1)}-${pad(d1.getDate())}`;
+    document.getElementById('to').value  =`${d2.getFullYear()}-${pad(d2.getMonth()+1)}-${pad(d2.getDate())}`;
+  }
+  function isoToBr(iso){ if(!iso) return '—'; const [y,m,d]=iso.slice(0,10).split('-'); return `${d}/${m}/${y}`; }
+  function daysUntilISO(iso){
+    if(!iso) return null;
+    const today=new Date(), t0=new Date(today.getFullYear(),today.getMonth(),today.getDate());
+    const d=new Date(iso), d0=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+    return Math.floor((d0-t0)/(24*60*60*1000));
+  }
+
+  /* ===========================
+     UI: toast
+     =========================== */
+  function showError(msg){
+    const t=document.getElementById('toast');
+    t.textContent=msg;
+    t.style.display='block';
+  }
+  function hideError(){ const t=document.getElementById('toast'); t.style.display='none'; t.textContent=''; }
+
+  /* ==========================================================
+     PING: só verifica se o servidor responde 200 na /health
+     (antes eu checava o cabeçalho CORS; removemos isso porque
+      o navegador não expõe esse header no fetch())
+     ========================================================== */
+  async function ping(){
+    try{
+      const r = await fetch(`${API}/health`, {method:'GET'});
+      if(!r.ok) throw new Error(`/health retornou ${r.status}`);
+      return true;
+    }catch(err){
+      showError(`Falha ao falar com a API (${API}). Detalhe: ${err.message}`);
+      return false;
+    }
+  }
+
+  /* ===========================
+     Buscar fila de pintura
+     =========================== */
+  async function carregar(){
+    hideError();
+    if(!(await ping())) return;
+
+    const filial = Number(document.getElementById('filial').value||1);
+    const from   = document.getElementById('from').value;
+    const to     = document.getElementById('to').value;
+    const cor    = (document.getElementById('cor').value||'').trim().toLowerCase();
+
+    const p = new URLSearchParams({ filial, date_field:'validade', from, to });
+    try{
+      const r = await fetch(`${API}/pintura/fila?`+p.toString());
+      if(!r.ok){
+        let detail = '';
+        try{ const j=await r.json(); detail = j.detail ? ` — ${j.detail}` : ''; }catch{}
+        throw new Error(`${r.status} ${r.statusText}${detail}`);
+      }
+      const j = await r.json();
+      render(j.items||[], cor);
+    }catch(e){
+      // Se for CORS real, o erro aparece aqui como "TypeError: Failed to fetch"
+      showError(`Erro ao carregar fila: ${e.message}. Se persistir, verifique o backend e as tabelas opcionais (app_setor_exec / app_event).`);
+    }
+  }
+
+  /* ===========================
+     Render (agrupa por cor)
+     =========================== */
+  function groupByCor(items){
+    const g=new Map();
+    (items||[]).forEach(it=>{
+      const key=(it.cor_txt||'SEM PINTURA').trim();
+      if(!g.has(key)) g.set(key, []);
+      g.get(key).push(it);
+    });
+    return g;
+  }
+
+  function render(items, corFilter){
+    const host=document.getElementById('host'); host.innerHTML='';
+    if(corFilter){ items = items.filter(i=> (i.cor_txt||'').toLowerCase().includes(corFilter)); }
+    if(!items.length){ host.innerHTML='<div class="card">Nenhuma OP na fila de Pintura para o período.</div>'; return; }
+
+    const groups = groupByCor(items);
+    [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).forEach(([cor, list])=>{
+      const total = list.length;
+      const box = document.createElement('div'); box.className='group';
+
+      const head = document.createElement('div'); head.className='ghead';
+      head.innerHTML = `<b>${cor}</b><span class="tag">${total} OP(s)</span>`;
+      box.appendChild(head);
+
+      list.forEach(op=>{
+        const row = document.createElement('div'); row.className='op';
+        const left = document.createElement('div');
+        const right = document.createElement('div'); right.className='btns';
+
+        const dval = op.dt_validade || op.ref_data || op.dt_prev_inicio || op.dt_emissao;
+        const ddiff = daysUntilISO(dval);
+        let badge = '';
+        if(ddiff!==null){
+          if(ddiff<=3) badge = `<span class="tag err">URGENTE: ${ddiff}d</span>`;
+          else if(ddiff<=5) badge = `<span class="tag warn">Atenção: ${ddiff}d</span>`;
+        }
+
+        const exec = (op.exec_status||'').toUpperCase();
+        const execBadge = exec==='EM_EXECUCAO' ? `<span class="tag ok">Em execução</span>` :
+                          exec==='CONCLUIDO' ? `<span class="tag ok">Concluída</span>` : '';
+
+        left.innerHTML = `
+          <div class="meta"><b>OP ${op.op_numero}</b> — ${op.descricao||''}</div>
+          <div class="mut">Validade: ${isoToBr(dval||'')}</div>
+          <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+            ${execBadge} ${badge}
+          </div>
+        `;
+
+        const btnStart = document.createElement('button');
+        btnStart.textContent = 'Iniciar';
+        btnStart.addEventListener('click', ()=> acao(op.op_numero, 'start'));
+
+        const btnFinish = document.createElement('button');
+        btnFinish.textContent = 'Finalizar';
+        btnFinish.addEventListener('click', ()=> acao(op.op_numero, 'finish'));
+
+        if(exec==='CONCLUIDO'){ btnStart.disabled = true; }
+        if(exec==='EM_EXECUCAO'){ btnFinish.classList.add('pri'); }
+
+        right.append(btnStart, btnFinish);
+        row.append(left, right);
+        box.appendChild(row);
+      });
+
+      host.appendChild(box);
+    });
+  }
+
+  /* ===========================
+     Ações (iniciar/finalizar)
+     =========================== */
+  async function acao(op_numero, tipo){
+    const usuario=(document.getElementById('usuario').value||'').trim() || null;
+    const url = tipo==='start' ? `${API}/operacoes/pintura/iniciar` : `${API}/operacoes/pintura/finalizar`;
+    const body = { op_numero, usuario };
+
+    try{
+      const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const j = await r.json();
+      if(!r.ok || !j.ok) throw 0;
+      await carregar();
+    }catch(e){
+      showError(`Falha ao ${tipo==='start'?'iniciar':'finalizar'} a pintura da OP ${op_numero}.`);
+    }
+  }
+
+  /* ===========================
+     Bootstrap
+     =========================== */
+  document.getElementById('btnCarregar').addEventListener('click', carregar);
+  setDefaults(); carregar();
+</script>
+</body>
+</html>
