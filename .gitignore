@@ -1,0 +1,42 @@
+# === Python / venv ===
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+*.log
+
+# === JetBrains / VSCode ===
+.vscode/
+.idea/
+
+# === OS junk ===
+.DS_Store
+Thumbs.db
+
+# === Node/Frontend (se vier a usar) ===
+node_modules/
+
+# === Env files (segredos!) ===
+.env
+*/.env
+backend/.env
+etl/.env
+
+# === Build / dist ===
+dist/
+build/
+*.egg-info/
+
+# === Dados locais temporários (se houver) ===
+/data/
+*.bak
+*.tmp
+
+# === Arquivos grandes / exportações ===
+*.zip
+*.7z
+*.tar
+*.gz
+*.rar
