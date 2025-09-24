@@ -269,4 +269,9 @@ feat(pintura): endpoint /pintura/fila com agregados por cor
 fix(front): corrige formatação dd/mm/aaaa no cartão de OP
 docs: adiciona README com passo-a-passo ETL→API→Front
 
-subir git: git push -u origin main
+subir git: 
+
+git add .
+git commit -m "chore: local snapshot before syncing with remote"
+
+git push -u origin main
